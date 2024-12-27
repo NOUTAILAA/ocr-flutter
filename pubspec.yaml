@@ -9,10 +9,18 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+    
   http: ^1.2.2
   image_picker: ^0.8.5+3
   fluttertoast: ^8.0.9
   file_picker: ^5.0.1
+
+
+
+
+
+
+
 
 
 dev_dependencies:
