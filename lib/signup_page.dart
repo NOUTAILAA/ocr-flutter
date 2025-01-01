@@ -21,7 +21,7 @@ class _SignUpPageState extends State<SignUpPage> {
     final password = _passwordController.text;
 
     final response = await http.post(
-      Uri.parse('http://127.0.0.1:5001/register'), // URL de ton API Flask
+      Uri.parse('http://192.168.1.102:5001/register'), // URL de ton API Flask
       headers: {'Content-Type': 'application/json'},
       body: jsonEncode({'email': email, 'password': password}),
     );

@@ -1,10 +1,11 @@
 import 'dart:convert';
-import 'dart:html' as html;
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:fluttertoast/fluttertoast.dart';
 import 'package:flutter_application_1/signup_page.dart'; // Importation de la page d'inscription
+import 'package:file_picker/file_picker.dart';
+import 'dart:io';
 
 void main() {
   runApp(MaterialApp(
@@ -34,7 +35,7 @@ class _LoginPageState extends State<LoginPage> {
     final password = _passwordController.text;
 
     final response = await http.post(
-      Uri.parse('http://127.0.0.1:5001/login'), // URL de ton API Flask
+      Uri.parse('http://192.168.1.102:5001/login'), // URL de ton API Flask
       headers: {'Content-Type': 'application/json'},
       body: jsonEncode({'email': email, 'password': password}),
     );
@@ -200,77 +201,89 @@ class _OcrScreenState extends State<OcrScreen> {
   String _imagePath = ""; // Initialize with an empty string
 
   // Fonction pour choisir une image avec le file picker
-  Future<void> _pickImage() async {
-    final html.FileUploadInputElement uploadInput =
-        html.FileUploadInputElement();
-    uploadInput.accept = 'image/*'; // Accepter uniquement les images
-    uploadInput.click(); // Simule un clic pour ouvrir le sélecteur de fichiers
 
-    uploadInput.onChange.listen((e) async {
-      final files = uploadInput.files;
-      if (files!.isEmpty) return;
 
-      final reader = html.FileReader();
-      reader.readAsArrayBuffer(files[0]!);
+Future<void> _pickImage() async {
+  final result = await FilePicker.platform.pickFiles(
+    type: FileType.image,
+    withData: true,  // Force le chargement des données en mémoire
+    withReadStream: true,
+  );
 
-      reader.onLoadEnd.listen((e) {
-        setState(() {
-          _imagePath = files[0]!.name; // Nom du fichier
-          _imageBytes = reader.result as Uint8List; // Contenu du fichier
-        });
+  if (result != null) {
+    if (result.files.single.bytes != null) {
+      // Si les bytes sont disponibles directement
+      setState(() {
+        _imagePath = result.files.single.name!;
+        _imageBytes = result.files.single.bytes!;
       });
-    });
+    } else if (result.files.single.path != null) {
+      // Lire l'image manuellement depuis le path
+      final file = File(result.files.single.path!);
+      setState(() {
+        _imagePath = result.files.single.name!;
+        _imageBytes = file.readAsBytesSync();
+      });
+    } else {
+      Fluttertoast.showToast(msg: "Impossible de lire l'image");
+    }
+  } else {
+    Fluttertoast.showToast(msg: "Aucun fichier sélectionné");
   }
+}
+
 
   // Fonction pour envoyer l'image et récupérer le texte OCR
-  Future<void> _uploadImage(String endpoint) async {
-    if (_imageBytes == null || _imagePath.isEmpty) {
-      return; // Assurez-vous que _imageBytes n'est pas nul avant de continuer
-    }
+ Future<void> _uploadImage(String endpoint) async {
+  if (_imageBytes == null || _imagePath.isEmpty) {
+    Fluttertoast.showToast(msg: "Veuillez sélectionner une image");
+    return;
+  }
 
-    // Créer un FormData pour envoyer l'image
-    final formData = html.FormData();
-    final blob = html.Blob([_imageBytes!]);
-    formData.appendBlob('image', blob, _imagePath);
+  var uri = Uri.parse('http://192.168.1.102:5000/$endpoint');
+  var request = http.MultipartRequest('POST', uri);
 
-    // Choisir le bon endpoint pour l'upload
-    String url = 'http://192.168.1.102:5000/$endpoint'; // URL de ton API Flask
+  request.headers['Authorization'] = 'Bearer ${widget.token}';
+  request.files.add(http.MultipartFile.fromBytes(
+    'image',
+    _imageBytes!,
+    filename: _imagePath,
+  ));
 
-    // Envoyer la requête POST avec l'image vers le backend Flask
-    try {
-      final response = await html.HttpRequest.request(
-        url,
-        method: 'POST',
-        sendData: formData,
-        requestHeaders: {
-          'Authorization':
-              'Bearer ${widget.token}' // Ajouter le token JWT dans l'entête
-        },
-      );
+  try {
+    var response = await request.send();
 
-      if (response.status == 200) {
-        final data = json.decode(response.responseText!);
-        setState(() {
-          if (endpoint == 'upload') {
-            _extractedText = data['data']; // Réponse en anglais
-          } else if (endpoint == 'upload_arabic') {
-            _extractedText = data['data_arabic']; // Réponse en arabe
-          } else {
-            _extractedText =
-                data['data_combined']; // Réponse combinée (arabe + anglais)
-          }
-        });
-      } else {
-        setState(() {
-          _extractedText = "Erreur lors du téléchargement de l'image";
-        });
-      }
-    } catch (e) {
+    if (response.statusCode == 200) {
+      var responseBody = await response.stream.bytesToString();
+      final data = json.decode(responseBody);
+
       setState(() {
-        _extractedText = "Échec de la communication avec le serveur : $e";
+        // Vérifie quel endpoint est utilisé pour extraire la bonne clé de réponse
+        if (endpoint == 'upload') {
+          _extractedText = data['data'] ?? "Aucun texte extrait.";
+        } else if (endpoint == 'upload_arabic') {
+          _extractedText = data['data_arabic'] ?? "Aucun texte arabe extrait.";
+        } else {
+          _extractedText = data['data_combined'] ?? "Aucun texte combiné extrait.";
+        }
+      });
+
+      Fluttertoast.showToast(msg: "Texte extrait avec succès !");
+    } else {
+      Fluttertoast.showToast(msg: "Erreur lors de l'upload de l'image.");
+      setState(() {
+        _extractedText = "Erreur serveur : ${response.statusCode}";
       });
     }
+  } catch (e) {
+    Fluttertoast.showToast(msg: "Échec de la communication : $e");
+    setState(() {
+      _extractedText = "Impossible de communiquer avec le serveur.";
+    });
   }
+}
+
+
 
   @override
   Widget build(BuildContext context) {
